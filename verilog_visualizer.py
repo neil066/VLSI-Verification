@@ -72,15 +72,16 @@ class Gate:
     outputs: List[str]  # Output net names
     bit_width: int = 1  # Bit width (default 1 for single-bit gates)
     port_map: Dict[str, str] = None # Mapping from port name to net name (for modules)
+    expression: Optional[str] = None  # Original RHS expression for assign gates
     
     def __post_init__(self):
         """Initialize empty lists if inputs/outputs are None"""
         if not self.inputs:
-            self.inputs = []  # Ensure inputs is always a list
+            self.inputs = []
         if not self.outputs:
-            self.outputs = []  # Ensure outputs is always a list
+            self.outputs = []
         if self.port_map is None:
-            self.port_map = {} # Ensure port_map is always a dict
+            self.port_map = {}
 
 
 @dataclass
@@ -502,39 +503,34 @@ class VerilogParser:
         # The regex captures: gate_name and connection_list
         # Examples: "and G1 (a, b, y);" -> gate_name="G1", connections="a, b, y"
         gate_patterns = [
-            # Uppercase patterns for mapped/synthesized files
-            (r'XNOR\s+(\w+)\s*\((.*?)\)\s*;', 'xnor'),  # XNOR gate: XNOR G1 (a, b, y);
-            (r'XOR\s+(\w+)\s*\((.*?)\)\s*;', 'xor'),    # XOR gate: XOR G1 (a, b, y);
-            (r'NAND\s+(\w+)\s*\((.*?)\)\s*;', 'nand'),  # NAND gate: NAND G1 (a, b, y);
-            (r'NOR\s+(\w+)\s*\((.*?)\)\s*;', 'nor'),    # NOR gate: NOR G1 (a, b, y);
-            (r'AND\s+(\w+)\s*\((.*?)\)\s*;', 'and'),    # AND gate: AND G1 (a, b, y);
-            (r'OR\s+(\w+)\s*\((.*?)\)\s*;', 'or'),      # OR gate: OR G1 (a, b, y);
-            (r'NOT\s+(\w+)\s*\((.*?)\)\s*;', 'not'),    # NOT gate: NOT G1 (a, y);
-            (r'INV\s+(\w+)\s*\((.*?)\)\s*;', 'not'),    # Inverter: INV G1 (a, y);
-            (r'MUX\s+(\w+)\s*\((.*?)\)\s*;', 'mux'),    # Multiplexer: MUX G1 (a, b, s, y);
-            (r'MUX2\s+(\w+)\s*\((.*?)\)\s*;', 'mux2'),  # 2-to-1 MUX: MUX2 G1 (a, b, s, y);
-            (r'MUX4\s+(\w+)\s*\((.*?)\)\s*;', 'mux4'),  # 4-to-1 MUX: MUX4 G1 (a, b, c, d, s1, s0, y);
-            
-            # Complex gates (multi-output) - uppercase for mapped files
-            (r'HA\s+(\w+)\s*\((.*?)\)\s*;', 'ha'),       # Half Adder: HA G1 (a, b, cout, sum);
-            (r'FA\s+(\w+)\s*\((.*?)\)\s*;', 'fa'),       # Full Adder: FA G1 (a, b, cin, cout, sum);
-            (r'HS\s+(\w+)\s*\((.*?)\)\s*;', 'hs'),       # Half Subtractor: HS G1 (a, b, bout, diff);
-            (r'FS\s+(\w+)\s*\((.*?)\)\s*;', 'fs'),       # Full Subtractor: FS G1 (a, b, bin, bout, diff);
-            
-            # Lowercase patterns for unmapped files
-            (r'xnor\s+(\w+)\s*\((.*?)\)\s*;', 'xnor'),  # xnor gate: xnor g1 (a, b, y);
-            (r'xor\s+(\w+)\s*\((.*?)\)\s*;', 'xor'),    # xor gate: xor g1 (a, b, y);
-            (r'nand\s+(\w+)\s*\((.*?)\)\s*;', 'nand'),  # nand gate: nand g1 (a, b, y);
-            (r'nor\s+(\w+)\s*\((.*?)\)\s*;', 'nor'),    # nor gate: nor g1 (a, b, y);
-            (r'and\s+(\w+)\s*\((.*?)\)\s*;', 'and'),    # and gate: and g1 (a, b, y);
-            (r'or\s+(\w+)\s*\((.*?)\)\s*;', 'or'),      # or gate: or g1 (a, b, y);
-            (r'not\s+(\w+)\s*\((.*?)\)\s*;', 'not'),    # not gate: not g1 (a, y);
-            
-            # Complex gates (multi-output)
-            (r'ha\s+(\w+)\s*\((.*?)\)\s*;', 'ha'),      # Half Adder: ha HA0 (a, b, cout, sum);
-            (r'fa\s+(\w+)\s*\((.*?)\)\s*;', 'fa'),      # Full Adder: fa FA0 (a, b, cin, cout, sum);
-            (r'hs\s+(\w+)\s*\((.*?)\)\s*;', 'hs'),      # Half Subtractor: hs HS0 (a, b, bout, diff);
-            (r'fs\s+(\w+)\s*\((.*?)\)\s*;', 'fs'),      # Full Subtractor: fs FS0 (a, b, bin, bout, diff);
+            # \b ensures we match standalone gate keywords, not substrings
+            # of longer names (e.g. 'or' must not match inside 'Subtractor')
+            (r'\bXNOR\s+(\w+)\s*\((.*?)\)\s*;', 'xnor'),
+            (r'\bXOR\s+(\w+)\s*\((.*?)\)\s*;', 'xor'),
+            (r'\bNAND\s+(\w+)\s*\((.*?)\)\s*;', 'nand'),
+            (r'\bNOR\s+(\w+)\s*\((.*?)\)\s*;', 'nor'),
+            (r'\bAND\s+(\w+)\s*\((.*?)\)\s*;', 'and'),
+            (r'\bOR\s+(\w+)\s*\((.*?)\)\s*;', 'or'),
+            (r'\bNOT\s+(\w+)\s*\((.*?)\)\s*;', 'not'),
+            (r'\bINV\s+(\w+)\s*\((.*?)\)\s*;', 'not'),
+            (r'\bMUX4\s+(\w+)\s*\((.*?)\)\s*;', 'mux4'),
+            (r'\bMUX2\s+(\w+)\s*\((.*?)\)\s*;', 'mux2'),
+            (r'\bMUX\s+(\w+)\s*\((.*?)\)\s*;', 'mux'),
+            (r'\bHA\s+(\w+)\s*\((.*?)\)\s*;', 'ha'),
+            (r'\bFA\s+(\w+)\s*\((.*?)\)\s*;', 'fa'),
+            (r'\bHS\s+(\w+)\s*\((.*?)\)\s*;', 'hs'),
+            (r'\bFS\s+(\w+)\s*\((.*?)\)\s*;', 'fs'),
+            (r'\bxnor\s+(\w+)\s*\((.*?)\)\s*;', 'xnor'),
+            (r'\bxor\s+(\w+)\s*\((.*?)\)\s*;', 'xor'),
+            (r'\bnand\s+(\w+)\s*\((.*?)\)\s*;', 'nand'),
+            (r'\bnor\s+(\w+)\s*\((.*?)\)\s*;', 'nor'),
+            (r'\band\s+(\w+)\s*\((.*?)\)\s*;', 'and'),
+            (r'\bor\s+(\w+)\s*\((.*?)\)\s*;', 'or'),
+            (r'\bnot\s+(\w+)\s*\((.*?)\)\s*;', 'not'),
+            (r'\bha\s+(\w+)\s*\((.*?)\)\s*;', 'ha'),
+            (r'\bfa\s+(\w+)\s*\((.*?)\)\s*;', 'fa'),
+            (r'\bhs\s+(\w+)\s*\((.*?)\)\s*;', 'hs'),
+            (r'\bfs\s+(\w+)\s*\((.*?)\)\s*;', 'fs'),
         ]
         
         # Apply each gate pattern to the module body
@@ -549,9 +545,7 @@ class VerilogParser:
                 
                 # Skip if we've already seen this gate (avoid duplicates)
                 if gate_name not in seen_gates:
-                    # Use generic connection parsing for all gates
-                    # This handles both named and positional connections correctly
-                    inputs, outputs, port_map = self._parse_gate_connections(connections)
+                    inputs, outputs, port_map = self._parse_gate_connections(connections, gate_type)
                     
                     # Create Gate object with parsed information
                     gate = Gate(
@@ -602,14 +596,17 @@ class VerilogParser:
             if instance_name not in seen_gates:
                 # Skip basic gates (already handled by _parse_gate_instances)
                 # This prevents double-parsing of gates that could be interpreted as modules
-                if module_type in ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor']:
+                skip_types = {
+                    'and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor',
+                    'AND', 'OR', 'NOT', 'NAND', 'NOR', 'XOR', 'XNOR',
+                    'INV', 'FA', 'HA', 'FS', 'HS', 'MUX', 'MUX2', 'MUX4',
+                    'fa', 'ha', 'fs', 'hs', 'mux', 'mux2', 'mux4',
+                    'input', 'output', 'inout', 'wire', 'reg', 'assign',
+                }
+                if module_type in skip_types:
                     continue
                 
-                # Parse the named port connections to extract inputs and outputs
-                inputs, outputs, port_map = self._parse_gate_connections(connections)
-                
                 # Map module type names to simulator-recognized gate types
-                # This allows hierarchical modules to be simulated correctly
                 gate_type_mapping = {
                     'full_adder': 'fa',
                     'FullAdder': 'fa',
@@ -623,9 +620,10 @@ class VerilogParser:
                     'Mux': 'mux2',
                     'mux4': 'mux4',
                 }
-                
-                # Use mapped gate type if available, otherwise keep original
                 mapped_gate_type = gate_type_mapping.get(module_type, module_type)
+
+                # Parse connections, passing mapped gate type for positional splitting
+                inputs, outputs, port_map = self._parse_gate_connections(connections, mapped_gate_type)
                 
                 # Create Gate object representing the module instantiation
                 gate = Gate(
@@ -680,12 +678,12 @@ class VerilogParser:
                 # Parse the expression to determine gate type and extract input variables
                 inputs, gate_type = self._parse_expression(expression)
                 
-                # Create Gate object representing the assign statement
                 gate = Gate(
-                    name=f"assign_{output_var}",  # Unique name for assign gate
-                    gate_type=gate_type,           # Determined from expression (e.g., "xor", "and")
-                    inputs=inputs,                 # Variables used in expression
-                    outputs=[output_var]           # Variable being assigned
+                    name=f"assign_{output_var}",
+                    gate_type=gate_type,
+                    inputs=inputs,
+                    outputs=[output_var],
+                    expression=expression.strip(),
                 )
                 gates.append(gate)
                 seen_gates.add(output_var)  # Mark as seen to avoid duplicates
@@ -760,36 +758,38 @@ class VerilogParser:
             # Simple NOT operation: !a or ~a
             gate_type = 'not'
         else:
-            # Unknown or unsupported operation (default to pass-through)
-            gate_type = 'not' if has_not else 'unknown'
+            # Simple wire assignment with no operators (e.g. assign sel = Q)
+            gate_type = 'buf'
         
         # Extract variable names from the expression (handle array indexing)
         # Pattern matches: variable names with optional array indices like Q[2], bout2[2]
         # Examples: "Q[2]", "bout2[2]", "PR2[0]", "a", "b"
         variables = re.findall(r'\b[a-zA-Z_]\w*(?:\[\d+\])?', original_expression)
-        inputs = list(set(variables))  # Remove duplicates using set conversion
+        inputs = list(dict.fromkeys(variables))
         
         # If no variables found, try simpler pattern
         if not inputs:
             variables = re.findall(r'[a-zA-Z_]\w*(?:\[\d+\])?', original_expression)
-            inputs = list(set(variables))
+            inputs = list(dict.fromkeys(variables))
         
         return inputs, gate_type
     
-    def _parse_gate_connections(self, connections: str) -> Tuple[List[str], List[str], Dict[str, str]]:
+    def _parse_gate_connections(self, connections: str,
+                               gate_type: str = '') -> Tuple[List[str], List[str], Dict[str, str]]:
         """
-        Parse gate input/output connections from connection string
-        
-        This method handles two types of connection formats:
-        1. Named connections: .port_name(net_name)
-           Example: .a(input1), .b(input2), .y(output1)
-        2. Positional connections: net1, net2, net3
-           Example: input1, input2, output1
-        
-        It uses naming conventions to determine if a port is input or output.
+        Parse gate input/output connections from connection string.
+
+        Handles named connections (.port(net)) and positional connections.
+        For positional connections the split between inputs and outputs depends
+        on the gate_type:
+          - Standard primitives (and, or, not, ...): first argument is the output.
+          - Multi-output components (fa, ha, fs, hs): last N are outputs.
+          - MUX: last argument is the output.
         
         Args:
             connections: Connection string from gate instantiation
+            gate_type: The type of gate (e.g. 'and', 'fa', 'ha') used for
+                       positional connection splitting.
             
         Returns:
             Tuple of (input_nets_list, output_nets_list, port_map)
@@ -798,36 +798,75 @@ class VerilogParser:
         outputs = []
         port_map = {}
         
-        # Split connections by commas and clean up whitespace
         conns = [conn.strip() for conn in connections.split(',')]
         
-        # Process each individual connection
         for conn in conns:
             if '.' in conn:
-                # Named connection: .port(net)
-                # Regex to extract port name and net name
                 match = re.match(r'\.(\w+)\s*\((.*?)\)', conn)
                 if match:
                     port_name = match.group(1)
                     net_name = match.group(2).strip()
                     
-                    # Store mapping
                     port_map[port_name] = net_name
                     
-                    # Determine direction based on port name conventions
-                    # Common output names: y, out, sum, cout, diff, bout
-                    if port_name.lower() in ['y', 'out', 'z', 'q', 'sum', 'cout', 'diff', 'bout', 's', 'co', 'bo']:
+                    output_port_names = [
+                        'y', 'out', 'z', 'q', 'sum', 'cout', 'diff', 'bout',
+                        's', 'co', 'bo', 'con', 'sn', 'result', 'carry',
+                        'output', 'dout', 'do', 'f', 'p', 'product',
+                    ]
+                    if port_name.lower() in output_port_names:
                         outputs.append(net_name)
                     else:
                         inputs.append(net_name)
             else:
-                # Positional connection: net
-                # This is harder to classify without knowing the gate definition
-                # We'll use a heuristic: usually last connection is output
-                # But for now, just add to inputs and let the caller handle it if needed
-                # (Most complex gates use named connections)
                 inputs.append(conn)
-                
+        
+        # For positional connections (no named ports), split based on gate type.
+        if not port_map and inputs:
+            gt = gate_type.lower()
+            # Multi-output gates: inputs come first, last N are outputs
+            #   FA/FS: 3 inputs, 2 outputs (carry/borrow, sum/diff)
+            #   HA/HS: 2 inputs, 2 outputs (carry/borrow, sum/diff)
+            #   MUX2:  3 inputs, 1 output
+            #   MUX4:  6 inputs, 1 output
+            if gt in ('fa', 'fs') and len(inputs) >= 5:
+                outputs = inputs[3:]
+                inputs = inputs[:3]
+            elif gt in ('ha', 'hs') and len(inputs) >= 4:
+                outputs = inputs[2:]
+                inputs = inputs[:2]
+            elif gt in ('mux', 'mux2') and len(inputs) >= 4:
+                outputs = [inputs[-1]]
+                inputs = inputs[:-1]
+            elif gt == 'mux4' and len(inputs) >= 7:
+                outputs = [inputs[-1]]
+                inputs = inputs[:-1]
+            else:
+                # Standard Verilog primitives: first argument is the output
+                outputs = [inputs[0]]
+                inputs = inputs[1:]
+        
+        # For multi-output gates with named connections, ensure the output order
+        # matches what the simulator returns:
+        #   FA/HA → [carry, sum]    FS/HS → [borrow, diff]
+        # The carry/borrow port must be outputs[0] and sum/diff must be outputs[1].
+        gt = gate_type.lower()
+        if port_map and len(outputs) == 2 and gt in ('fa', 'ha', 'fs', 'hs'):
+            carry_ports = {'cout', 'carry', 'co', 'con', 'bout', 'borrow', 'bo'}
+            sum_ports = {'sum', 's', 'sn', 'diff', 'd'}
+            # Find which port name maps to each output net
+            port_for_net = {}
+            for pname, nname in port_map.items():
+                if nname in outputs:
+                    port_for_net[nname] = pname.lower()
+            # Reorder: carry/borrow first, sum/diff second
+            if len(port_for_net) == 2:
+                net0, net1 = outputs[0], outputs[1]
+                p0 = port_for_net.get(net0, '')
+                p1 = port_for_net.get(net1, '')
+                if p0 in sum_ports and p1 in carry_ports:
+                    outputs = [net1, net0]
+
         return inputs, outputs, port_map
     
     def _parse_net_declarations(self, module_body: str) -> Dict[str, Net]:
@@ -1083,11 +1122,11 @@ class LogicSimulator:
             for module in self.modules:
                 self._simulate_module(module, all_nets)
         
-        # Convert any remaining X values to 0 for display (ensure all wires have values)
-        # This handles cases where simulation didn't fully converge
-        for net_name, net in all_nets.items():
-            if net.value == LogicValue.X:
-                net.value = LogicValue.ZERO
+        # Report any nets that could not be resolved
+        unresolved = [name for name, net in all_nets.items() if net.value == LogicValue.X]
+        if unresolved:
+            print(f"Note: {len(unresolved)} net(s) remain unresolved (X): {', '.join(sorted(unresolved)[:10])}"
+                  + (f" ... and {len(unresolved)-10} more" if len(unresolved) > 10 else ""))
         
         # Return final net values as a simple dictionary
         return {name: net.value for name, net in all_nets.items()}
@@ -1149,7 +1188,101 @@ class LogicSimulator:
             # If no progress was made in this iteration, simulation is complete
             if not progress_made:
                 break
-    
+
+    @staticmethod
+    def _resolve_net_name(net_name: str, all_nets: Dict[str, Net]) -> str:
+        """Resolve dynamic array indices like X[PR2[0]] at simulation time.
+
+        If the name contains a nested bracket (e.g. X[PR2[0]]), it is a dynamic
+        index that must be resolved to X[<value of PR2[0]>].
+        """
+        # Detect dynamic index: BASE[INNER_BASE[INNER_IDX]]
+        m = re.match(r'^(\w+)\[(\w+\[\d+\])\]$', net_name)
+        if m:
+            base, inner_net = m.group(1), m.group(2)
+            if inner_net in all_nets:
+                idx_val = all_nets[inner_net].value
+                if idx_val != LogicValue.X:
+                    resolved = f"{base}[{idx_val.value}]"
+                    if resolved in all_nets:
+                        return resolved
+        return net_name
+
+    def _evaluate_expression(self, expr: str, all_nets: Dict[str, Net]) -> LogicValue:
+        """Evaluate a Verilog assign expression using current net values.
+
+        Supports: &, |, ^, !, ~, parentheses, ternary (sel ? b : a),
+        and variable references with optional array indices.
+        """
+        def _lookup(var_name: str) -> int:
+            """Return 0 or 1 for a net; -1 for X."""
+            resolved = self._resolve_net_name(var_name.strip(), all_nets)
+            if resolved in all_nets:
+                v = all_nets[resolved].value
+                if v == LogicValue.ONE:
+                    return 1
+                elif v == LogicValue.ZERO:
+                    return 0
+            return -1  # X
+
+        expr = expr.strip()
+
+        # Handle ternary: sel ? b : a
+        ternary = re.match(r'^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$', expr)
+        if ternary:
+            sel_val = self._evaluate_expression(ternary.group(1), all_nets)
+            if sel_val == LogicValue.ONE:
+                return self._evaluate_expression(ternary.group(2), all_nets)
+            elif sel_val == LogicValue.ZERO:
+                return self._evaluate_expression(ternary.group(3), all_nets)
+            return LogicValue.X
+
+        # Convert Verilog expression to Python-evaluable form
+        py_expr = expr
+        # Replace Verilog operators with Python operators
+        py_expr = py_expr.replace('~', ' not_bit ')
+        py_expr = py_expr.replace('!', ' not_bit ')
+
+        # Find all variable references (with optional array index)
+        var_pattern = r'[a-zA-Z_]\w*(?:\[\w+(?:\[\d+\])?\])?'
+        variables = re.findall(var_pattern, py_expr)
+        variables = list(dict.fromkeys(variables))
+
+        # Substitute variable values
+        val_map: Dict[str, int] = {}
+        has_x = False
+        for var in variables:
+            if var == 'not_bit':
+                continue
+            v = _lookup(var)
+            if v == -1:
+                has_x = True
+            val_map[var] = v
+
+        if has_x:
+            return LogicValue.X
+
+        # Build safe evaluation by replacing variables with their integer values
+        # Process longest variable names first to avoid partial replacements
+        safe_expr = py_expr
+        for var in sorted(val_map.keys(), key=len, reverse=True):
+            escaped = re.escape(var)
+            safe_expr = re.sub(r'\b' + escaped + r'\b', str(val_map[var]), safe_expr)
+            # Also handle array notation without word boundary issues
+            safe_expr = safe_expr.replace(var, str(val_map[var]))
+
+        # Replace Verilog/intermediate operators with Python bitwise operators
+        safe_expr = safe_expr.replace('not_bit', '~')
+        safe_expr = safe_expr.replace('&', ' & ')
+        safe_expr = safe_expr.replace('|', ' | ')
+        safe_expr = safe_expr.replace('^', ' ^ ')
+
+        try:
+            result = eval(safe_expr) & 1  # Mask to single bit
+            return LogicValue.ONE if result else LogicValue.ZERO
+        except Exception:
+            return LogicValue.X
+
     def _simulate_gate(self, gate: Gate, all_nets: Dict[str, Net]) -> List[LogicValue]:
         """
         Simulate a single gate and return output values
@@ -1165,17 +1298,23 @@ class LogicSimulator:
         Returns:
             List of LogicValue objects representing the gate's outputs
         """
-        # Get input values for this gate
+        # Get input values for this gate, resolving dynamic array indices
         input_values = []
         for input_net in gate.inputs:
-            if input_net in all_nets:
-                input_values.append(all_nets[input_net].value)
+            resolved = self._resolve_net_name(input_net, all_nets)
+            if resolved in all_nets:
+                input_values.append(all_nets[resolved].value)
             else:
-                # Treat unknown nets as 0 to avoid X propagation in diagrams
-                input_values.append(LogicValue.ZERO)
+                input_values.append(LogicValue.X)
+
+        # For assign gates with a stored expression, evaluate it directly
+        if gate.expression:
+            return [self._evaluate_expression(gate.expression, all_nets)]
         
         # Route to appropriate gate simulation method based on gate type
-        if gate.gate_type == 'and':
+        if gate.gate_type == 'buf':
+            return [input_values[0]] if input_values else [LogicValue.X]
+        elif gate.gate_type == 'and':
             return self._simulate_and(input_values)
         elif gate.gate_type == 'or':
             return self._simulate_or(input_values)
@@ -1201,19 +1340,52 @@ class LogicSimulator:
             return self._simulate_mux2(input_values)
         elif gate.gate_type == 'mux4':
             return self._simulate_mux4(input_values)
-        elif gate.gate_type == 'complex':
-            # For complex expressions, default to AND operation
-            # This handles cases like !PR2[2] & bout1[2]
-            # Note: This is simplified - full parsing would handle NOT on individual terms
-            return self._simulate_and(input_values)
         else:
-            # Unknown gate type - try to compute based on inputs
-            # Default to AND if we have inputs, otherwise return 0
-            if input_values:
-                return self._simulate_and(input_values)
-            else:
-                return [LogicValue.ZERO] * len(gate.outputs)
+            # Unknown gate type -- attempt recursive sub-module simulation
+            sub_module = self._find_module_definition(gate.gate_type)
+            if sub_module and gate.port_map:
+                return self._simulate_submodule(gate, sub_module, all_nets)
+            # Fallback: propagate X so downstream gates know value is unresolved
+            print(f"Warning: Unknown gate type '{gate.gate_type}' for gate '{gate.name}', outputs set to X")
+            return [LogicValue.X] * max(len(gate.outputs), 1)
     
+    def _find_module_definition(self, gate_type: str) -> Optional[Module]:
+        """Return the Module whose name matches *gate_type* (case-insensitive)."""
+        for module in self.modules:
+            if module.name.lower() == gate_type.lower():
+                return module
+        return None
+
+    def _simulate_submodule(self, gate: Gate, sub_module: Module,
+                            parent_nets: Dict[str, Net]) -> List[LogicValue]:
+        """Recursively simulate a sub-module instance and return its output values."""
+        sub_sim = LogicSimulator([sub_module])
+        sub_inputs: Dict[str, LogicValue] = {}
+
+        for port_name, parent_net in gate.port_map.items():
+            if port_name in sub_module.ports and sub_module.ports[port_name] == 'input':
+                if parent_net in parent_nets:
+                    sub_inputs[port_name] = parent_nets[parent_net].value
+                else:
+                    sub_inputs[port_name] = LogicValue.X
+
+        sub_sim.set_inputs(sub_inputs)
+        sub_net_values = sub_sim.simulate()
+
+        results: List[LogicValue] = []
+        for output_net in gate.outputs:
+            # Find which sub-module port maps to this parent net
+            matched = False
+            for port_name, parent_net in gate.port_map.items():
+                if parent_net == output_net:
+                    val = sub_net_values.get(port_name, LogicValue.X)
+                    results.append(val)
+                    matched = True
+                    break
+            if not matched:
+                results.append(LogicValue.X)
+        return results
+
     def _simulate_and(self, inputs: List[LogicValue]) -> List[LogicValue]:
         """
         Simulate AND gate logic
@@ -1667,7 +1839,225 @@ class DOTGenerator:
             self._add_module_to_dot(dot, module, net_values, focus_gate)
         
         return dot.source  # Return the DOT file content as a string
-    
+
+    def generate_high_level_dot(self, modules: List[Module]) -> str:
+        """
+        Generate a high-level DOT representation of the top-level module
+        
+        This method creates a simplified DOT graph that shows the top-level
+        module as a single block with only its primary inputs and outputs.
+        
+        Args:
+            modules: List of Module objects; the first is treated as top-level
+        
+        Returns:
+            DOT file content as a string
+        """
+
+        # Safeguard: handle empty module list
+        if not modules:
+            dot = graphviz.Digraph(comment='High-level Verilog Module')
+            dot.attr(rankdir='LR')
+            dot.attr('graph', size='8.5,11!', ratio='auto', nodesep='0.3', ranksep='0.4')
+            dot.attr('node', fontsize='8', width='0.6', height='0.4', margin='0.05,0.02')
+            dot.attr('edge', fontsize='8', arrowsize='0.6')
+            dot.node('empty', 'No modules to visualize', shape='box', fillcolor='lightgray', style='filled')
+            return dot.source
+
+        top_module = modules[0]
+
+        # Create directed graph with similar styling to the detailed view
+        dot = graphviz.Digraph(comment='High-level Verilog Module')
+        dot.attr(rankdir='LR')  # Left to right layout (inputs → module → outputs)
+        dot.attr('graph', size='8.5,11!', ratio='auto', nodesep='0.3', ranksep='0.4')
+        dot.attr('node', fontsize='8', width='0.6', height='0.4', margin='0.05,0.02')
+        dot.attr('edge', fontsize='8', arrowsize='0.6')
+
+        # Create a single node representing the top-level module
+        module_node_id = f"module_{top_module.name}"
+        module_label = f"{top_module.name}\\n(high-level)"
+        dot.node(module_node_id, module_label, shape='box', fillcolor='lightblue', style='filled,bold')
+
+        # Collect unique base names for inputs and outputs (handle array ports)
+        input_ports: Set[str] = set()
+        output_ports: Set[str] = set()
+
+        for port, direction in top_module.ports.items():
+            base_name = port.split('[')[0] if '[' in port else port
+            if direction == 'input':
+                input_ports.add(base_name)
+            elif direction == 'output':
+                output_ports.add(base_name)
+
+        # Add input nodes and edges into the module block
+        for base_name in sorted(input_ports):
+            input_node_id = f"input_{base_name}"
+            dot.node(input_node_id, base_name, shape='circle', fillcolor='lightgreen', style='filled')
+            dot.edge(input_node_id, module_node_id)
+
+        # Add output nodes and edges out of the module block
+        for base_name in sorted(output_ports):
+            output_node_id = f"output_{base_name}"
+            dot.node(output_node_id, base_name, shape='circle', fillcolor='orange', style='filled')
+            dot.edge(module_node_id, output_node_id)
+
+        return dot.source
+
+    def generate_high_level_simulation_dot(self, modules: List[Module],
+                                           net_values: Dict[str, LogicValue]) -> str:
+        """
+        Generate a higher-level simulation view.
+
+        For hierarchical designs (top module contains sub-module instances) this
+        renders each sub-module instance as a single box with simulation values
+        on its port edges, hiding the internal gate-level detail.
+
+        For flat / mapped designs (top module contains only primitive gates) this
+        renders the top module as a single block with simulation values on the
+        primary I/O ports.
+
+        Args:
+            modules: List of Module objects; the first is the top-level module
+            net_values: Simulation results mapping net names to LogicValue
+
+        Returns:
+            DOT file content as a string
+        """
+        if not modules:
+            dot = graphviz.Digraph(comment='High-level Simulation')
+            dot.node('empty', 'No modules to visualize', shape='box',
+                     fillcolor='lightgray', style='filled')
+            return dot.source
+
+        top_module = modules[0]
+        primitive_types = {'and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor'}
+
+        # Decide whether the design is hierarchical (has sub-module instances)
+        has_submodule_instances = any(
+            g.gate_type not in primitive_types
+            for g in top_module.gates
+            if not g.name.startswith('assign_')
+        )
+
+        dot = graphviz.Digraph(comment='High-level Simulation')
+        dot.attr(rankdir='LR')
+        dot.attr('graph', size='11,8.5!', ratio='auto', nodesep='0.5', ranksep='0.7')
+        dot.attr('node', fontsize='9', width='0.7', height='0.5', margin='0.08,0.04')
+        dot.attr('edge', fontsize='8', arrowsize='0.6')
+
+        # --- Collect array-aware input / output labels with values ---
+        def _port_label(base_name: str, direction: str) -> str:
+            """Build a label like 'X[4:0]=10110' or 'a=1' with simulation values."""
+            bits = []
+            for port, d in top_module.ports.items():
+                if d != direction:
+                    continue
+                pbase = port.split('[')[0] if '[' in port else port
+                if pbase != base_name:
+                    continue
+                if '[' in port:
+                    idx_str = port.split('[')[1].split(']')[0]
+                    if idx_str.isdigit():
+                        bits.append((int(idx_str), port))
+                else:
+                    val = net_values.get(port, LogicValue.X).value
+                    return f"{base_name}={val}"
+            if bits:
+                bits.sort(key=lambda x: x[0], reverse=True)
+                msb, lsb = bits[0][0], bits[-1][0]
+                val_str = ''.join(net_values.get(p, LogicValue.X).value for _, p in bits)
+                return f"{base_name}[{msb}:{lsb}]={val_str}"
+            return base_name
+
+        input_bases: Set[str] = set()
+        output_bases: Set[str] = set()
+        for port, direction in top_module.ports.items():
+            base = port.split('[')[0] if '[' in port else port
+            if direction == 'input':
+                input_bases.add(base)
+            elif direction == 'output':
+                output_bases.add(base)
+
+        # -- Add primary input nodes --
+        for base in sorted(input_bases):
+            label = _port_label(base, 'input')
+            dot.node(f"input_{base}", label, shape='circle',
+                     fillcolor='lightgreen', style='filled')
+
+        # -- Add primary output nodes --
+        for base in sorted(output_bases):
+            label = _port_label(base, 'output')
+            color = 'lightcoral'
+            dot.node(f"output_{base}", label, shape='circle',
+                     fillcolor=color, style='filled')
+
+        if has_submodule_instances:
+            # ---- Hierarchical view: one box per sub-module instance ----
+            added_connections: Set[tuple] = set()
+            assign_gates = [g for g in top_module.gates if g.name.startswith('assign_')]
+            instance_gates = [g for g in top_module.gates if not g.name.startswith('assign_')]
+
+            for gate in instance_gates:
+                gate_label = f"{gate.name}\\n({gate.gate_type.upper()})"
+                color = self._get_gate_color(gate.gate_type)
+                dot.node(gate.name, gate_label, shape='box',
+                         fillcolor=color, style='filled,bold')
+
+            for gate in assign_gates:
+                gate_label = f"{gate.name}\\n({gate.gate_type.upper()})"
+                dot.node(gate.name, gate_label, shape='box',
+                         fillcolor='khaki', style='filled')
+
+            all_gates = instance_gates + assign_gates
+
+            # Build output-net -> gate lookup for fast edge creation
+            output_to_gate: Dict[str, str] = {}
+            for gate in all_gates:
+                for out_net in gate.outputs:
+                    output_to_gate[out_net] = gate.name
+
+            for gate in all_gates:
+                for input_net in gate.inputs:
+                    input_base = input_net.split('[')[0] if '[' in input_net else input_net
+                    if input_base in input_bases:
+                        conn = (f"input_{input_base}", gate.name)
+                        if conn not in added_connections:
+                            val = net_values.get(input_net, LogicValue.X).value
+                            dot.edge(conn[0], conn[1], label=val)
+                            added_connections.add(conn)
+                    elif input_net in output_to_gate:
+                        src = output_to_gate[input_net]
+                        conn = (src, gate.name, input_net)
+                        if conn not in added_connections:
+                            val = net_values.get(input_net, LogicValue.X).value
+                            short = input_net if len(input_net) <= 8 else ''
+                            lbl = f"{short}={val}" if short else val
+                            dot.edge(src, gate.name, label=lbl)
+                            added_connections.add(conn)
+
+                for output_net in gate.outputs:
+                    output_base = output_net.split('[')[0] if '[' in output_net else output_net
+                    if output_base in output_bases:
+                        conn = (gate.name, f"output_{output_base}")
+                        if conn not in added_connections:
+                            val = net_values.get(output_net, LogicValue.X).value
+                            dot.edge(conn[0], conn[1], label=val)
+                            added_connections.add(conn)
+        else:
+            # ---- Flat / mapped view: single module block with I/O values ----
+            module_id = f"module_{top_module.name}"
+            module_label = f"{top_module.name}\\n({len(top_module.gates)} gates)"
+            dot.node(module_id, module_label, shape='box',
+                     fillcolor='lightblue', style='filled,bold')
+
+            for base in sorted(input_bases):
+                dot.edge(f"input_{base}", module_id)
+
+            for base in sorted(output_bases):
+                dot.edge(module_id, f"output_{base}")
+
+        return dot.source
+
     def _add_module_to_dot(self, dot: graphviz.Digraph, module: Module, 
                           net_values: Dict[str, LogicValue], focus_gate: Optional[str]):
         """
@@ -1738,7 +2128,7 @@ class DOTGenerator:
                 continue
             
             # Determine gate styling based on type
-            if gate.gate_type in ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor']:
+            if gate.gate_type in ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', 'buf']:
                 # Basic gates - use colored boxes with distinct colors for each type
                 gate_label = f"{gate.name}\\n({gate.gate_type.upper()})"
                 color = self._get_gate_color(gate.gate_type)
@@ -1832,7 +2222,8 @@ class DOTGenerator:
             # Multiplexers
             'mux': 'lightblue',           # Blue for general multiplexers
             'mux2': 'lightblue',          # Blue for 2-to-1 MUX
-            'mux4': 'lightblue'           # Blue for 4-to-1 MUX
+            'mux4': 'lightblue',          # Blue for 4-to-1 MUX
+            'buf': 'lightyellow',          # Yellow for buffers / wire assignments
         }
         return colors.get(gate_type, 'lightgray')  # Default gray for unknown types
     
@@ -2026,6 +2417,24 @@ class VerilogVisualizer:
         except Exception as e:
             print(f"Error generating structure PDF: {e}")
             return False
+
+        # Generate highest-level (single-block) visualization of the top-level module
+        try:
+            highest_level_name = f"{base_filename}_highest_level"
+            high_level_dot = self.dot_generator.generate_high_level_dot([top_module])
+
+            # Write highest-level DOT file
+            highest_level_dot_file = f"{highest_level_name}.dot"
+            with open(highest_level_dot_file, 'w') as f:
+                f.write(high_level_dot)
+
+            # Generate highest-level PDF
+            high_level_graph = graphviz.Source(high_level_dot)
+            high_level_graph.render(highest_level_name, format='pdf', cleanup=True)
+            print(f"[SUCCESS] Generated highest-level visualization: {highest_level_name}.pdf")
+            print(f"          (Single-block view of the top-level module)")
+        except Exception as e:
+            print(f"Warning: Error generating highest-level PDF: {e}")
         
         # STEP 2: Detect and prompt for inputs
         print("\n=== Step 2: Input Configuration ===")
@@ -2112,6 +2521,23 @@ class VerilogVisualizer:
             print("Mode: Step-by-step simulation (level by level)")
             net_values = self._run_step_simulation(all_modules, simulation_name)
         
+        # STEP 4: Generate higher-level simulation view
+        if net_values:
+            print("\n=== Step 4: Generating Higher-Level Simulation View ===")
+            high_sim_name = f"{base_filename}_high_level_simulation"
+            try:
+                high_sim_dot = self.dot_generator.generate_high_level_simulation_dot(
+                    [top_module], net_values
+                )
+                with open(f"{high_sim_name}.dot", 'w') as f:
+                    f.write(high_sim_dot)
+                high_sim_graph = graphviz.Source(high_sim_dot)
+                high_sim_graph.render(high_sim_name, format='pdf', cleanup=True)
+                print(f"[SUCCESS] Generated higher-level simulation: {high_sim_name}.pdf")
+                print(f"          (Sub-modules shown as blocks with simulation values)")
+            except Exception as e:
+                print(f"Warning: Error generating higher-level simulation PDF: {e}")
+
         # After main simulation, offer local gate simulation
         if net_values:
             self._prompt_for_local_gate_simulation(all_modules, net_values)
