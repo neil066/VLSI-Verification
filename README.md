@@ -8,11 +8,16 @@ A comprehensive Python tool for visualizing and simulating Verilog circuits. Thi
 - **Dual Visualization Modes**: 
   - Structure visualization (circuit topology without values)
   - Simulation visualization (circuit with logic values propagated)
+- **High-Level Views**:
+  - Highest-level structure view (single top-module block)
+  - Higher-level simulation view (sub-modules as blocks with propagated values)
 - **Two Simulation Modes**:
   - **Full Mode (`-f`)**: Run complete simulation showing all values at once
   - **Step Mode (`-s`)**: Run step-by-step simulation level by level
 - **Interactive Input**: Automatically detects required inputs and prompts for values or accepts input files
 - **PDF Visualization**: Generates clean, readable circuit diagrams with logic values
+- **Assign/Expression Support**: Evaluates `assign` expressions (including ternary and bitwise operators) during simulation
+- **Accurate Unknown Handling**: Unresolved signals remain as `X` and are reported after simulation
 - **Comprehensive Gate Support**: Supports 18+ gate types including:
   - Basic gates: AND, OR, NOT, NAND, NOR, XOR, XNOR
   - Arithmetic: Full Adder (FA), Half Adder (HA), Full Subtractor (FS), Half Subtractor (HS)
@@ -110,10 +115,16 @@ For each Verilog file processed, the tool generates:
 - `{filename}_structure.pdf` - PDF visualization of circuit structure
 - `{filename}_simulation.dot` - Graphviz DOT file with simulation values
 - `{filename}_simulation.pdf` - PDF visualization with logic values propagated
+- `{filename}_highest_level.dot` - High-level top-module structure DOT (single-block view)
+- `{filename}_highest_level.pdf` - High-level top-module structure PDF
+- `{filename}_high_level_simulation.dot` - High-level simulation DOT
+- `{filename}_high_level_simulation.pdf` - High-level simulation PDF (sub-module block view)
 
 **Example:** For `simple_gates.v`, you'll get:
 - `simple_gates_structure.dot` and `simple_gates_structure.pdf`
 - `simple_gates_simulation.dot` and `simple_gates_simulation.pdf`
+- `simple_gates_highest_level.dot` and `simple_gates_highest_level.pdf`
+- `simple_gates_high_level_simulation.dot` and `simple_gates_high_level_simulation.pdf`
 
 ## 📁 Example Files
 
@@ -147,6 +158,7 @@ The generated PDF visualizations show:
 - **Wire Values**: Logic values (0, 1, X for unknown) displayed on connections
 - **Left-to-Right Flow**: Logical signal flow from inputs to outputs
 - **Hierarchical Modules**: Nested structures for hierarchical designs
+- **Top-Level Summary Views**: Optional high-level diagrams for quick architecture and value-flow checks
 
 ## 🏗️ Architecture
 
@@ -170,6 +182,7 @@ Verilog File(s) → Parse → Structure Visualization → Input Collection → S
 - Gate instantiations (and, or, not, nand, nor, xor, xnor)
 - Arithmetic modules (Full Adder, Half Adder, Full Subtractor, Half Subtractor)
 - Multiplexers (MUX2, MUX4)
+- Continuous assignments (`assign`) with expressions (`&`, `|`, `^`, `!`, `~`, `?:`)
 - Wire declarations
 - Hierarchical module instantiation
 - Multi-bit signals (buses)
@@ -177,7 +190,7 @@ Verilog File(s) → Parse → Structure Visualization → Input Collection → S
 
 ## 🧪 Testing
 
-See `TESTING_GUIDE.md` for comprehensive testing instructions and test results for all example files.
+See `docs/TESTING_GUIDE.md` for comprehensive testing instructions and test results for all example files.
 
 Quick test example:
 ```bash
@@ -205,6 +218,7 @@ python verilog_visualizer.py "Verilog Files/simple_gates.v" -f
    - **Solution**: Check Verilog syntax and gate connections
    - Examine the `.dot` file to verify circuit structure
    - Ensure all inputs are provided
+   - Check console notes for unresolved (`X`) nets
 
 5. **"You must specify a simulation mode"**
    - **Solution**: Use `-f` (full) or `-s` (step) flag when running the tool
@@ -212,6 +226,10 @@ python verilog_visualizer.py "Verilog Files/simple_gates.v" -f
 6. **Missing inputs during simulation**
    - **Solution**: Provide input file when prompted or enter values interactively
    - Check input file format matches expected pattern
+
+7. **Unexpected `X` values in output**
+   - **Cause**: One or more required nets could not be resolved from available inputs/logic
+   - **Solution**: Verify all primary inputs are present and that assign expressions reference valid signals
 
 ### Debug Mode
 
@@ -229,8 +247,8 @@ The modular design makes it easy to add support for:
 
 ## 📚 Additional Resources
 
-- `TESTING_GUIDE.md` - Complete testing guide with examples
-- `pdf/explanatiobs/` - Detailed documentation and explanations
+- `docs/TESTING_GUIDE.md` - Complete testing guide with examples
+- `docs/explanations/` - Detailed documentation and explanations
 - Graphviz documentation: [https://graphviz.org/documentation/](https://graphviz.org/documentation/)
 
 ## 📄 License
@@ -249,4 +267,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ---
 
-For detailed documentation and advanced usage, see the files in the `pdf/explanatiobs/` directory.
+For detailed documentation and advanced usage, see the files in the `docs/explanations/` directory.
